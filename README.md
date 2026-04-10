@@ -1,11 +1,16 @@
 # koishi-plugin-rollpig
 
-`koishi-plugin-rollpig` 是一个 Koishi 插件，用于提供“今日小猪”“随机小猪”“找猪”等功能，并将结果以统一风格的图片卡片输出。
+`koishi-plugin-rollpig` 是一个 Koishi 插件，用于提供“今日小猪”“随机小猪”“找猪”等功能。
+
+当前行为：
+
+- `/今日小猪` 输出图片卡片
+- `/随机小猪` 和 `/找猪` 保持原始图片直出样式
 
 ## 声明
 
 - 本仓库中的 Koishi 适配代码与当前实现，全部由 AI 协助完成。
-- 本项目是基于原始项目的功能思路进行 Koishi 移植与图片样式适配，不是原作者发布的官方 Koishi 版本。
+- 本项目基于原始项目的功能思路进行 Koishi 移植与图片样式适配，不是原作者发布的官方 Koishi 版本。
 
 ## 原始项目
 
@@ -74,6 +79,7 @@ npm pack
 ## 仓库
 
 - GitHub: [ouy0328/koishi-plugin-rollpig](https://github.com/ouy0328/koishi-plugin-rollpig)
+- npm: [koishi-plugin-rollpig](https://www.npmjs.com/package/koishi-plugin-rollpig)
 
 ## 致谢
 
