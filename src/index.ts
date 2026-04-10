@@ -15,27 +15,7 @@ const IMAGE_DIR = path.join(RESOURCE_DIR, 'image')
 const FONT_DIR = path.join(RESOURCE_DIR, 'font')
 const USER_FONT_DIR = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Windows', 'Fonts')
 const PIG_POOL_FILE = path.join(RESOURCE_DIR, 'pig.json')
-const NAME_FONT_CANDIDATES = [
-  'C:\\Windows\\Fonts\\msyhbd.ttc',
-  'C:\\Windows\\Fonts\\msyh.ttc',
-  path.join(FONT_DIR, '荆南麦圆体.otf'),
-]
-const DESC_FONT_CANDIDATES = [
-  'C:\\Windows\\Fonts\\msyh.ttc',
-  'C:\\Windows\\Fonts\\msyhl.ttc',
-  path.join(FONT_DIR, '可爱字体.ttf'),
-]
-const ANALYSIS_FONT_CANDIDATES = [
-  path.join(USER_FONT_DIR, '华康圆体W7-A.ttf'),
-  path.join(FONT_DIR, '华康圆体W7.ttc'),
-  path.join(FONT_DIR, '华康圆体W7.ttf'),
-  path.join(FONT_DIR, 'DFYuanW7-GB.ttf'),
-  'C:\\Windows\\Fonts\\DFYuanW7-GB.ttf',
-  'C:\\Windows\\Fonts\\dfyuanw7-gb.ttf',
-  path.join(FONT_DIR, '荆南麦圆体.otf'),
-]
 const IMAGE_EXTENSIONS = ['.png', '.jpg', '.jpeg', '.webp', '.gif'] as const
-const COMMAND_PREFIXES = new Set(['/', '／'])
 
 const CARD_WIDTH = 800
 const CARD_HEIGHT = 800
@@ -50,7 +30,59 @@ const CARD_DESC_LINE_HEIGHT = 42
 const CARD_ANALYSIS_LINE_HEIGHT = 45
 const CARD_DESC_MAX_WIDTH = 620
 const CARD_ANALYSIS_MAX_WIDTH = 680
+
 type MessagePart = string | ReturnType<typeof h.image> | ReturnType<typeof h.at>
+
+interface FontPreference {
+  families: string[]
+  fileCandidates: string[]
+  alias: string
+}
+
+interface FontAsset {
+  family: string
+  source: string
+}
+
+interface CanvasFonts {
+  nameFont: FontAsset
+  descFont: FontAsset
+  analysisFont: FontAsset
+}
+
+const NAME_FONT_PREFERENCE: FontPreference = {
+  families: ['Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
+  fileCandidates: [
+    'C:\\Windows\\Fonts\\msyhbd.ttc',
+    'C:\\Windows\\Fonts\\msyh.ttc',
+    path.join(FONT_DIR, '荆南麦圆体.otf'),
+  ],
+  alias: 'RollPigNameFallback',
+}
+
+const DESC_FONT_PREFERENCE: FontPreference = {
+  families: ['Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
+  fileCandidates: [
+    'C:\\Windows\\Fonts\\msyh.ttc',
+    'C:\\Windows\\Fonts\\msyhl.ttc',
+    path.join(FONT_DIR, '可爱字体.ttf'),
+  ],
+  alias: 'RollPigDescFallback',
+}
+
+const ANALYSIS_FONT_PREFERENCE: FontPreference = {
+  families: ['华康圆体W7-A', '华康圆体W7', 'DFYuanW7-GB', 'Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
+  fileCandidates: [
+    path.join(USER_FONT_DIR, '华康圆体W7-A.ttf'),
+    path.join(FONT_DIR, '华康圆体W7.ttc'),
+    path.join(FONT_DIR, '华康圆体W7.ttf'),
+    path.join(FONT_DIR, 'DFYuanW7-GB.ttf'),
+    'C:\\Windows\\Fonts\\DFYuanW7-GB.ttf',
+    'C:\\Windows\\Fonts\\dfyuanw7-gb.ttf',
+    path.join(FONT_DIR, '荆南麦圆体.otf'),
+  ],
+  alias: 'RollPigAnalysisFallback',
+}
 
 export interface Config {
   dataDir: string
@@ -59,6 +91,9 @@ export interface Config {
   remoteCacheHours: number
   startupRefresh: boolean
   timezone: string
+  enableTodayPig: boolean
+  enableRandomPig: boolean
+  enableFindPig: boolean
 }
 
 export const Config: Schema<Config> = Schema.object({
@@ -68,6 +103,9 @@ export const Config: Schema<Config> = Schema.object({
   remoteCacheHours: Schema.number().default(12).description('PigHub 图片缓存刷新间隔（小时）。'),
   startupRefresh: Schema.boolean().default(true).description('启动后是否后台刷新 PigHub 缓存。'),
   timezone: Schema.string().default('').description('“今日小猪”使用的时区，留空表示跟随宿主环境。'),
+  enableTodayPig: Schema.boolean().default(true).description('是否启用“今日小猪”相关指令。'),
+  enableRandomPig: Schema.boolean().default(true).description('是否启用“随机小猪”指令。'),
+  enableFindPig: Schema.boolean().default(true).description('是否启用“找猪 / 搜猪”指令。'),
 })
 
 interface PigHubResponse {
@@ -103,11 +141,6 @@ interface PigCacheFile {
   images: PigInfo[]
 }
 
-interface FontAsset {
-  family: string
-  source: string
-}
-
 class RollPigStore {
   private readonly dataDir: string
   private readonly recordsFile: string
@@ -118,6 +151,7 @@ class RollPigStore {
   private remoteRefreshedAt = 0
   private remoteRefreshTask?: Promise<void>
   private fontsReady = false
+  private canvasFonts?: CanvasFonts
 
   constructor(private readonly config: Config) {
     this.dataDir = path.isAbsolute(config.dataDir)
@@ -132,7 +166,7 @@ class RollPigStore {
     await this.loadPigPool()
     await Promise.all([this.loadRecords(), this.loadRemoteCache()])
 
-    if (this.config.startupRefresh) {
+    if (this.config.startupRefresh && (this.config.enableRandomPig || this.config.enableFindPig)) {
       void this.refreshRemotePigs(true).catch((error) => {
         logger.warn(`启动时刷新 PigHub 缓存失败：${this.formatError(error)}`)
       })
@@ -205,14 +239,9 @@ class RollPigStore {
     if (userId && !isDirect) output.push(h.at(userId), ' ')
 
     const image = this.getPigsonalityImage(pig.id)
-    if (image) {
-      output.push(image, '\n')
-    }
+    if (image) output.push(image, '\n')
 
-    output.push(
-      `【今日小猪】\n名称：${pig.name}\n描述：${pig.description}\n解析：${pig.analysis}`,
-    )
-
+    output.push(`【今日小猪】\n名称：${pig.name}\n描述：${pig.description}\n解析：${pig.analysis}`)
     return output
   }
 
@@ -269,6 +298,7 @@ class RollPigStore {
 
     return canvas.toBuffer('image/png')
   }
+
   private wrapText(ctx: SKRSContext2D, text: string, maxWidth: number, font: string) {
     ctx.save()
     ctx.font = font
@@ -324,48 +354,49 @@ class RollPigStore {
   }
 
   private drawAvatarPlaceholder(ctx: SKRSContext2D, top: number) {
+    const { descFont } = this.ensureCanvasFonts()
     ctx.fillStyle = '#ff4d4f'
-    ctx.font = this.getCanvasFont(24, 'RollPigDesc')
+    ctx.font = this.getCanvasFont(24, descFont.family)
     ctx.fillText('图片加载失败', CARD_WIDTH / 2, top + CARD_AVATAR_SIZE / 2 - 12)
   }
 
   private ensureCanvasFonts() {
-    if (this.fontsReady) {
-      return {
-        nameFont: { family: 'RollPigName', source: 'registered' },
-        descFont: { family: 'RollPigDesc', source: 'registered' },
-        analysisFont: { family: 'RollPigAnalysis', source: 'registered' },
-      }
+    if (this.fontsReady && this.canvasFonts) {
+      return this.canvasFonts
     }
 
-    const nameFont = this.loadFontAsset(NAME_FONT_CANDIDATES, '名称字体', 'RollPigName')
-    const descFont = this.loadFontAsset(DESC_FONT_CANDIDATES, '描述字体', 'RollPigDesc')
-    const analysisFont = this.loadFontAsset(ANALYSIS_FONT_CANDIDATES, '解析字体', 'RollPigAnalysis')
+    const nameFont = this.resolveFontAsset(NAME_FONT_PREFERENCE, '名称字体')
+    const descFont = this.resolveFontAsset(DESC_FONT_PREFERENCE, '描述字体')
+    const analysisFont = this.resolveFontAsset(ANALYSIS_FONT_PREFERENCE, '解析字体')
+    this.canvasFonts = { nameFont, descFont, analysisFont }
     this.fontsReady = true
-    return { nameFont, descFont, analysisFont }
+    return this.canvasFonts
   }
 
   private getCanvasFont(fontSize: number, family: string) {
-    return `${fontSize}px "${family}"`
+    return `${fontSize}px ${family}`
   }
 
-  private loadFontAsset(fontCandidates: string[], label: string, alias: string): FontAsset {
-    const fontPath = fontCandidates.find((candidate) => existsSync(candidate))
-    if (!fontPath) {
-      throw new Error(`${label}未找到可用字体文件。`)
-    }
-
-    if (!GlobalFonts.has(alias)) {
-      const registered = GlobalFonts.registerFromPath(fontPath, alias)
+  private resolveFontAsset(preference: FontPreference, label: string): FontAsset {
+    const fallbackPath = preference.fileCandidates.find((candidate) => existsSync(candidate))
+    if (fallbackPath && !GlobalFonts.has(preference.alias)) {
+      const registered = GlobalFonts.registerFromPath(fallbackPath, preference.alias)
       if (!registered) {
-        throw new Error(`${label}注册失败：${fontPath}`)
+        throw new Error(`${label}注册失败：${fallbackPath}`)
       }
     }
 
-    logger.info(`${label}使用字体：${fontPath}`)
+    const families = [...preference.families]
+    let source = 'system'
+    if (fallbackPath) {
+      families.push(preference.alias)
+      source = `system -> ${fallbackPath}`
+    }
+
+    logger.info(`${label}优先使用字体族：${families.join(', ')}`)
     return {
-      family: alias,
-      source: fontPath,
+      family: families.map((family) => `"${family}"`).join(', '),
+      source,
     }
   }
 
@@ -532,15 +563,6 @@ class RollPigStore {
     return pool.slice(0, size)
   }
 
-  private escapeXml(text: string) {
-    return text
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&apos;')
-  }
-
   private formatError(error: unknown) {
     if (error instanceof Error) return error.message
     return String(error)
@@ -554,17 +576,10 @@ export function apply(ctx: Context, config: Config) {
     logger.error(`初始化失败：${error instanceof Error ? error.stack || error.message : String(error)}`)
   })
 
-  const ensureSlashPrefix = (session: any, commandName: string) => {
-    if (session?.event?.argv) return ''
-    if (COMMAND_PREFIXES.has(session?.stripped?.prefix)) return ''
-    return `请使用 /${commandName} 触发。`
-  }
-
   ctx.command('今日小猪', '抽取今天属于你的小猪。')
     .alias('今天是什么小猪', '本日小猪', '当日小猪')
     .action(async ({ session }) => {
-      const triggerHint = ensureSlashPrefix(session, '今日小猪')
-      if (triggerHint) return triggerHint
+      if (!config.enableTodayPig) return '“今日小猪”当前已被禁用。'
 
       const userId = session?.userId || session?.author?.id || session?.uid
       if (!userId) return '这次没认出你是谁，稍后再试一次吧。'
@@ -580,9 +595,8 @@ export function apply(ctx: Context, config: Config) {
     })
 
   ctx.command('随机小猪 [count:number]', '从 PigHub 随机获取猪猪图片。')
-    .action(async ({ session }, count = 1) => {
-      const triggerHint = ensureSlashPrefix(session, '随机小猪')
-      if (triggerHint) return triggerHint
+    .action(async (_, count = 1) => {
+      if (!config.enableRandomPig) return '“随机小猪”当前已被禁用。'
 
       if (!Number.isInteger(count) || count < 1) {
         return '数量要填正整数哦。'
@@ -606,9 +620,8 @@ export function apply(ctx: Context, config: Config) {
   ctx.command('找猪 [keyword:text]', '根据关键词或图片 ID 查找 PigHub 猪猪。')
     .alias('搜猪')
     .option('id', '-i, --id <id:string> 指定要查找的图片 ID。')
-    .action(async ({ options, session }, keyword) => {
-      const triggerHint = ensureSlashPrefix(session, '找猪')
-      if (triggerHint) return triggerHint
+    .action(async ({ options }, keyword) => {
+      if (!config.enableFindPig) return '“找猪”当前已被禁用。'
 
       const imageId = typeof options?.id === 'string' ? options.id.trim() : ''
       const searchKeyword = typeof keyword === 'string' ? keyword.trim() : ''
