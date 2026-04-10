@@ -50,17 +50,6 @@ const CARD_DESC_LINE_HEIGHT = 42
 const CARD_ANALYSIS_LINE_HEIGHT = 45
 const CARD_DESC_MAX_WIDTH = 620
 const CARD_ANALYSIS_MAX_WIDTH = 680
-const GALLERY_CARD_WIDTH = CARD_WIDTH
-const GALLERY_CARD_HEIGHT = CARD_HEIGHT
-const GALLERY_IMAGE_MAX_WIDTH = 520
-const GALLERY_IMAGE_MAX_HEIGHT = 420
-const GALLERY_TITLE_SIZE = 42
-const GALLERY_META_SIZE = 28
-const GALLERY_TITLE_LINE_HEIGHT = 50
-const GALLERY_IMAGE_TEXT_SPACING = 30
-const GALLERY_TITLE_META_SPACING = 20
-const GALLERY_TITLE_MAX_WIDTH = 620
-
 type MessagePart = string | ReturnType<typeof h.image> | ReturnType<typeof h.at>
 
 export interface Config {
@@ -199,17 +188,10 @@ class RollPigStore {
     const output: MessagePart[] = []
     const sliced = pigs.slice(0, limit)
 
-    for (const [index, pig] of sliced.entries()) {
+    sliced.forEach((pig, index) => {
       if (index > 0) output.push('\n\n')
-
-      try {
-        const card = await this.renderPigHubCard(pig)
-        output.push(h.image(card, 'image/png'))
-      } catch (error) {
-        logger.warn(`渲染 PigHub 小猪卡片失败：${this.formatError(error)}`)
-        output.push(`${pig.title}-${pig.id}\n`, h.image(this.toPigHubImageUrl(pig)))
-      }
-    }
+      output.push(`${pig.title}-${pig.id}\n`, h.image(this.toPigHubImageUrl(pig)))
+    })
 
     if (pigs.length > sliced.length) {
       output.push(`\n\n还有 ${pigs.length - sliced.length} 张结果未展示。`)
@@ -287,49 +269,6 @@ class RollPigStore {
 
     return canvas.toBuffer('image/png')
   }
-
-  private async renderPigHubCard(pig: PigInfo) {
-    const { nameFont, descFont } = this.ensureCanvasFonts()
-    const canvas = createCanvas(GALLERY_CARD_WIDTH, GALLERY_CARD_HEIGHT)
-    const ctx = canvas.getContext('2d')
-
-    ctx.fillStyle = '#ffffff'
-    ctx.fillRect(0, 0, GALLERY_CARD_WIDTH, GALLERY_CARD_HEIGHT)
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    ctx.imageSmoothingEnabled = true
-    ctx.imageSmoothingQuality = 'high'
-
-    const titleFont = this.getCanvasFont(GALLERY_TITLE_SIZE, nameFont.family)
-    const titleLines = this.wrapText(ctx, pig.title, GALLERY_TITLE_MAX_WIDTH, titleFont)
-    const imageMetrics = await this.measureRemotePigImage(this.toPigHubImageUrl(pig))
-
-    const titleHeight = Math.max(1, titleLines.length) * GALLERY_TITLE_LINE_HEIGHT
-    const metaHeight = Math.ceil(GALLERY_META_SIZE * 1.2)
-    const totalHeight = imageMetrics.height
-      + GALLERY_IMAGE_TEXT_SPACING
-      + titleHeight
-      + GALLERY_TITLE_META_SPACING
-      + metaHeight
-
-    const startY = Math.floor((GALLERY_CARD_HEIGHT - totalHeight) / 2)
-    const imageTop = startY
-    const titleTop = imageTop + imageMetrics.height + GALLERY_IMAGE_TEXT_SPACING
-    const metaTop = titleTop + titleHeight + GALLERY_TITLE_META_SPACING
-
-    await this.drawRemotePigImage(ctx, this.toPigHubImageUrl(pig), imageTop, imageMetrics)
-
-    ctx.fillStyle = '#000000'
-    ctx.font = titleFont
-    this.drawMultilineText(ctx, titleLines, GALLERY_CARD_WIDTH / 2, titleTop, GALLERY_TITLE_LINE_HEIGHT)
-
-    ctx.fillStyle = '#555555'
-    ctx.font = this.getCanvasFont(GALLERY_META_SIZE, descFont.family)
-    ctx.fillText(`ID: ${pig.id}`, GALLERY_CARD_WIDTH / 2, metaTop)
-
-    return canvas.toBuffer('image/png')
-  }
-
   private wrapText(ctx: SKRSContext2D, text: string, maxWidth: number, font: string) {
     ctx.save()
     ctx.font = font
@@ -361,59 +300,6 @@ class RollPigStore {
     lines.forEach((line, index) => {
       ctx.fillText(line, centerX, top + index * lineHeight)
     })
-  }
-
-  private async measureRemotePigImage(url: string) {
-    try {
-      const image = await loadImage(url)
-      const scale = Math.min(
-        GALLERY_IMAGE_MAX_WIDTH / image.width,
-        GALLERY_IMAGE_MAX_HEIGHT / image.height,
-        1,
-      )
-      return {
-        image,
-        width: Math.max(1, Math.round(image.width * scale)),
-        height: Math.max(1, Math.round(image.height * scale)),
-      }
-    } catch (error) {
-      logger.warn(`加载 PigHub 图片失败：${this.formatError(error)}`)
-      return {
-        image: null,
-        width: GALLERY_IMAGE_MAX_WIDTH,
-        height: GALLERY_IMAGE_MAX_HEIGHT,
-      }
-    }
-  }
-
-  private async drawRemotePigImage(
-    ctx: SKRSContext2D,
-    url: string,
-    top: number,
-    metrics?: Awaited<ReturnType<RollPigStore['measureRemotePigImage']>>,
-  ) {
-    const resolved = metrics || await this.measureRemotePigImage(url)
-    const left = Math.round((GALLERY_CARD_WIDTH - resolved.width) / 2)
-
-    if (!resolved.image) {
-      this.drawRemotePigPlaceholder(ctx, top, resolved.width, resolved.height)
-      return resolved.height
-    }
-
-    ctx.drawImage(resolved.image as any, left, top, resolved.width, resolved.height)
-    return resolved.height
-  }
-
-  private drawRemotePigPlaceholder(ctx: SKRSContext2D, top: number, width: number, height: number) {
-    const left = Math.round((GALLERY_CARD_WIDTH - width) / 2)
-    ctx.fillStyle = '#f4f4f4'
-    ctx.fillRect(left, top, width, height)
-    ctx.strokeStyle = '#dddddd'
-    ctx.lineWidth = 2
-    ctx.strokeRect(left, top, width, height)
-    ctx.fillStyle = '#999999'
-    ctx.font = this.getCanvasFont(28, 'RollPigDesc')
-    ctx.fillText('图片加载失败', GALLERY_CARD_WIDTH / 2, top + height / 2 - 16)
   }
 
   private async drawAvatar(ctx: SKRSContext2D, pigId: string, top: number) {
