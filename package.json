@@ -1,7 +1,7 @@
 {
   "name": "koishi-plugin-rollpig",
-  "version": "1.0.1",
-  "description": "Koishi 小猪抽取插件，支持今日小猪、随机小猪、找猪，并输出统一风格的图片卡片。",
+  "version": "1.0.2",
+  "description": "Koishi 小猪抽取插件，支持今日小猪图片卡片、随机小猪和找猪。",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",
   "exports": {
@@ -52,8 +52,8 @@
   },
   "koishi": {
     "description": {
-      "zh": "小猪抽取插件，支持今日小猪、随机小猪和找猪，并输出统一风格的图片卡片。",
-      "en": "A Koishi plugin for daily pig personality, random pig images, and pig search with unified image card output."
+      "zh": "小猪抽取插件，支持今日小猪图片卡片、随机小猪和找猪。",
+      "en": "A Koishi plugin for daily pig personality cards, random pig images, and pig search."
     }
   },
   "peerDependencies": {
