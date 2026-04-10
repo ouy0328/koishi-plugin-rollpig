@@ -71,6 +71,10 @@ npm run build
 npm pack
 ```
 
+## 仓库
+
+- GitHub: [ouy0328/koishi-plugin-rollpig](https://github.com/ouy0328/koishi-plugin-rollpig)
+
 ## 致谢
 
 - [Koishi 插件开发文档](https://koishi.chat/zh-CN/guide/plugin)
