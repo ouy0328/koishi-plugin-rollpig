@@ -1,6 +1,6 @@
 {
   "name": "koishi-plugin-rollpig",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Koishi 小猪抽取插件，支持今日小猪图片卡片、随机小猪和找猪。",
   "main": "lib/index.js",
   "types": "lib/index.d.ts",

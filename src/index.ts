@@ -53,9 +53,9 @@ interface CanvasFonts {
 const NAME_FONT_PREFERENCE: FontPreference = {
   families: ['Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
   fileCandidates: [
+    path.join(FONT_DIR, '荆南麦圆体.otf'),
     'C:\\Windows\\Fonts\\msyhbd.ttc',
     'C:\\Windows\\Fonts\\msyh.ttc',
-    path.join(FONT_DIR, '荆南麦圆体.otf'),
   ],
   alias: 'RollPigNameFallback',
 }
@@ -63,9 +63,9 @@ const NAME_FONT_PREFERENCE: FontPreference = {
 const DESC_FONT_PREFERENCE: FontPreference = {
   families: ['Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
   fileCandidates: [
+    path.join(FONT_DIR, '可爱字体.ttf'),
     'C:\\Windows\\Fonts\\msyh.ttc',
     'C:\\Windows\\Fonts\\msyhl.ttc',
-    path.join(FONT_DIR, '可爱字体.ttf'),
   ],
   alias: 'RollPigDescFallback',
 }
@@ -74,12 +74,12 @@ const ANALYSIS_FONT_PREFERENCE: FontPreference = {
   families: ['华康圆体W7-A', '华康圆体W7', 'DFYuanW7-GB', 'Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
   fileCandidates: [
     path.join(USER_FONT_DIR, '华康圆体W7-A.ttf'),
-    path.join(FONT_DIR, '华康圆体W7.ttc'),
     path.join(FONT_DIR, '华康圆体W7.ttf'),
+    path.join(FONT_DIR, '华康圆体W7.ttc'),
     path.join(FONT_DIR, 'DFYuanW7-GB.ttf'),
+    path.join(FONT_DIR, '荆南麦圆体.otf'),
     'C:\\Windows\\Fonts\\DFYuanW7-GB.ttf',
     'C:\\Windows\\Fonts\\dfyuanw7-gb.ttf',
-    path.join(FONT_DIR, '荆南麦圆体.otf'),
   ],
   alias: 'RollPigAnalysisFallback',
 }
@@ -387,10 +387,10 @@ class RollPigStore {
     }
 
     const families = [...preference.families]
-    let source = 'system'
+    let source = 'system fallback'
     if (fallbackPath) {
-      families.push(preference.alias)
-      source = `system -> ${fallbackPath}`
+      families.unshift(preference.alias)
+      source = `file -> system fallback (${fallbackPath})`
     }
 
     logger.info(`${label}优先使用字体族：${families.join(', ')}`)
