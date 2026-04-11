@@ -50,6 +50,20 @@ interface CanvasFonts {
   analysisFont: FontAsset
 }
 
+interface MentionTarget {
+  userId: string
+  name?: string
+}
+
+const TODAY_PIG_COMMANDS = ['今日小猪', '今天是什么小猪', '本日小猪', '当日小猪'] as const
+const SESSION_MENTION_TARGET = '__rollpigMentionTarget__'
+
+const normalizeUserId = (value: unknown) => {
+  if (typeof value === 'string') return value.trim()
+  if (typeof value === 'number' || typeof value === 'bigint') return String(value)
+  return ''
+}
+
 const NAME_FONT_PREFERENCE: FontPreference = {
   families: ['Microsoft YaHei UI', 'Microsoft YaHei', '微软雅黑', 'PingFang SC', 'Noto Sans CJK SC', 'sans-serif'],
   fileCandidates: [
@@ -205,16 +219,22 @@ class RollPigStore {
     return this.remotePigs.filter((pig) => pig.title.toLowerCase().includes(normalized))
   }
 
-  async renderPigsonalityMessage(pig: Pigsonality, userId?: string, isDirect = false) {
+  async renderPigsonalityMessage(
+    pig: Pigsonality,
+    targetUserId?: string,
+    isDirect = false,
+    title = '. 这是你的今日小猪：',
+    fallbackTitle = '【今日小猪】',
+  ) {
     try {
       const card = await this.renderPigCard(pig)
       const output: MessagePart[] = []
-      if (userId && !isDirect) output.push(h.at(userId), ' ')
-      output.push('. 这是你的今日小猪：', h.image(card, 'image/png'))
+      if (targetUserId && !isDirect) output.push(h.at(targetUserId), ' ')
+      output.push(title, h.image(card, 'image/png'))
       return output
     } catch (error) {
       logger.warn(`渲染今日小猪卡片失败：${this.formatError(error)}`)
-      return this.renderPigsonalityFallback(pig, userId, isDirect)
+      return this.renderPigsonalityFallback(pig, targetUserId, isDirect, fallbackTitle)
     }
   }
 
@@ -234,14 +254,19 @@ class RollPigStore {
     return output
   }
 
-  private renderPigsonalityFallback(pig: Pigsonality, userId?: string, isDirect = false) {
+  private renderPigsonalityFallback(
+    pig: Pigsonality,
+    targetUserId?: string,
+    isDirect = false,
+    title = '【今日小猪】',
+  ) {
     const output: MessagePart[] = []
-    if (userId && !isDirect) output.push(h.at(userId), ' ')
+    if (targetUserId && !isDirect) output.push(h.at(targetUserId), ' ')
 
     const image = this.getPigsonalityImage(pig.id)
     if (image) output.push(image, '\n')
 
-    output.push(`【今日小猪】\n名称：${pig.name}\n描述：${pig.description}\n解析：${pig.analysis}`)
+    output.push(`${title}\n名称：${pig.name}\n描述：${pig.description}\n解析：${pig.analysis}`)
     return output
   }
 
@@ -576,18 +601,161 @@ export function apply(ctx: Context, config: Config) {
     logger.error(`初始化失败：${error instanceof Error ? error.stack || error.message : String(error)}`)
   })
 
+  const getIgnoredMentionIds = (session: any) => {
+    const ids = new Set<string>()
+    const candidates = [
+      session?.selfId,
+      session?.bot?.selfId,
+      session?.bot?.user?.id,
+      session?.event?.selfId,
+    ]
+
+    for (const candidate of candidates) {
+      const normalized = normalizeUserId(candidate)
+      if (normalized) ids.add(normalized)
+    }
+
+    return ids
+  }
+
+  const trimLeadingWhitespace = (elements: any[]) => {
+    while (elements[0]?.type === 'text' && !String(elements[0]?.attrs?.content || '').trim()) {
+      elements.shift()
+    }
+  }
+
+  const dropLeadingBotMention = (elements: any[], session: any, ignoredIds: Set<string>) => {
+    if (!session?.stripped?.atSelf) return elements
+
+    const clone = elements.slice()
+    trimLeadingWhitespace(clone)
+
+    const leadingId = normalizeUserId(clone[0]?.attrs?.id)
+    if (clone[0]?.type === 'at' && (!ignoredIds.size || ignoredIds.has(leadingId))) {
+      clone.shift()
+      trimLeadingWhitespace(clone)
+    }
+
+    return clone
+  }
+
+  const extractMentionTarget = (elements: any[] | undefined, session?: any): MentionTarget | undefined => {
+    if (!Array.isArray(elements) || !elements.length) return
+    const ignoredIds = getIgnoredMentionIds(session)
+    const candidates = dropLeadingBotMention(elements, session, ignoredIds)
+
+    for (const element of candidates) {
+      if (element?.type !== 'at') continue
+      const targetId = normalizeUserId(element?.attrs?.id)
+      if (!targetId) continue
+      if (ignoredIds.has(targetId)) continue
+      return {
+        userId: targetId,
+        name: typeof element?.attrs?.name === 'string' ? element.attrs.name.trim() : '',
+      }
+    }
+  }
+
+  const rewriteLeadingMentionTodayPig = (session: any) => {
+    const elements = session?.event?.message?.elements ?? session?.elements
+    if (!Array.isArray(elements) || !elements.length) return
+
+    let index = 0
+    while (elements[index]?.type === 'text' && !String(elements[index]?.attrs?.content || '').trim()) {
+      index += 1
+    }
+
+    const mention = elements[index]
+    if (mention?.type !== 'at') return
+
+    const targetId = normalizeUserId(mention?.attrs?.id)
+    if (!targetId || targetId === session?.selfId) return
+
+    const trailing = elements.slice(index + 1)
+    if (!trailing.length) return
+    if (trailing.some((element) => element?.type !== 'text')) return
+
+    const trailingText = trailing
+      .map((element) => String(element?.attrs?.content || ''))
+      .join('')
+      .trim()
+    const commandName = TODAY_PIG_COMMANDS.find((name) => name === trailingText)
+    if (!commandName) return
+
+    session.content = `${commandName} ${mention}`
+    session._stripped = undefined
+    session.argv = undefined
+  }
+
+  const rewriteTrailingMentionTodayPig = (session: any) => {
+    const elements = session?.event?.message?.elements ?? session?.elements
+    if (!Array.isArray(elements) || !elements.length) return
+
+    let changed = false
+    const rewritten = elements.map((element, index) => {
+      if (element?.type !== 'text') return element
+
+      const next = elements[index + 1]
+      if (next?.type !== 'at') return element
+
+      const content = String(element?.attrs?.content || '')
+      if (!content || /\s$/.test(content)) return element
+
+      const trimmed = content.trim()
+      if (!TODAY_PIG_COMMANDS.some((name) => name === trimmed)) return element
+
+      changed = true
+      return h.text(`${content} `)
+    })
+
+    if (!changed) return
+
+    session.content = rewritten.join('')
+    session._stripped = undefined
+    session.argv = undefined
+  }
+
+  const getMentionTarget = (session: any, argv?: any): MentionTarget | undefined => {
+    return session?.[SESSION_MENTION_TARGET]
+      ?? extractMentionTarget(typeof session?.content === 'string' ? h.parse(session.content) : undefined, session)
+      ?? extractMentionTarget(session?.elements, session)
+      ?? extractMentionTarget(session?.event?.message?.elements, session)
+      ?? extractMentionTarget(typeof argv?.source === 'string' ? h.parse(argv.source) : undefined, session)
+      ?? extractMentionTarget(
+        Array.isArray(argv?.args)
+          ? argv.args.flatMap((arg: unknown) => typeof arg === 'string' ? h.parse(arg) : [])
+          : undefined,
+        session,
+      )
+  }
+
+  ctx.on('before-attach', (session: any) => {
+    const rawElements = session?.event?.message?.elements ?? session?.elements
+    session[SESSION_MENTION_TARGET] = extractMentionTarget(rawElements, session)
+    rewriteTrailingMentionTodayPig(session)
+    rewriteLeadingMentionTodayPig(session)
+  }, true)
+
   ctx.command('今日小猪', '抽取今天属于你的小猪。')
     .alias('今天是什么小猪', '本日小猪', '当日小猪')
-    .action(async ({ session }) => {
+    .action(async (argv) => {
+      const { session } = argv
       if (!config.enableTodayPig) return '“今日小猪”当前已被禁用。'
 
-      const userId = session?.userId || session?.author?.id || session?.uid
-      if (!userId) return '这次没认出你是谁，稍后再试一次吧。'
+      const currentUserId = session?.userId || session?.author?.id || session?.uid
+      if (!currentUserId) return '这次没认出你是谁，稍后再试一次吧。'
+
+      const mentionTarget = getMentionTarget(session, argv)
+      const targetUserId = mentionTarget?.userId || currentUserId
+      const targetName = mentionTarget?.name || 'TA'
+      const isSelfTarget = targetUserId === currentUserId
+      const cardTitle = isSelfTarget ? '. 这是你的今日小猪：' : `. 这是 ${targetName} 的今日小猪：`
+      const fallbackTitle = isSelfTarget ? '【今日小猪】' : `【${targetName} 的今日小猪】`
 
       try {
         await initialization
-        const pig = await store.getTodayPig(userId)
-        return await store.renderPigsonalityMessage(pig, userId, session?.isDirect)
+        const pig = await store.getTodayPig(targetUserId)
+        return await store.renderPigsonalityMessage(pig, targetUserId, session?.isDirect, cardTitle, fallbackTitle)
       } catch (error) {
         logger.warn(`处理“今天是什么小猪”失败：${error instanceof Error ? error.message : String(error)}`)
         return '小猪窝打翻了，稍后再来看看吧。'
