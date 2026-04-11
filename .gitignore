@@ -3,3 +3,4 @@ lib
 *.tgz
 font-test.png
 _source_astrbot/
+data/
