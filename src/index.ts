@@ -478,9 +478,20 @@ class RollPigStore {
         }
 
         const data = await response.json() as any
-        const images = Array.isArray(data?.data) ? data.data : []
+        let images = (Array.isArray(data?.data) ? data.data : []).filter(
+          (img: any): img is PigInfo =>
+            typeof img?.id === 'string' && img.id.trim() !== '' &&
+            typeof img?.title === 'string' &&
+            typeof img?.image_url === 'string' && img.image_url.trim() !== '',
+        )
         if (!images.length) {
           throw new Error('PigHub 返回了空图片列表。')
+        }
+
+        const MAX_REMOTE_IMAGES = 5000
+        if (images.length > MAX_REMOTE_IMAGES) {
+          logger.warn(`PigHub 返回了 ${images.length} 张图片，超过上限 ${MAX_REMOTE_IMAGES}，已截断`)
+          images = images.slice(0, MAX_REMOTE_IMAGES)
         }
 
         this.remotePigs = images
@@ -527,6 +538,7 @@ class RollPigStore {
   }
 
   private getPigsonalityImageFile(pigId: string) {
+    if (!/^[\w-]+$/.test(pigId)) return
     for (const extension of IMAGE_EXTENSIONS) {
       const file = path.join(IMAGE_DIR, `${pigId}${extension}`)
       if (existsSync(file)) return file
@@ -556,20 +568,29 @@ class RollPigStore {
   }
 
   private toPigHubImageUrl(pig: PigInfo) {
-    return new URL(pig.image_url, PIGHUB_BASE_URL).toString()
+    const url = new URL(pig.image_url, PIGHUB_BASE_URL)
+    if (url.origin !== PIGHUB_BASE_URL) {
+      logger.warn(`PigHub 返回了非法图片来源：${pig.image_url}（ID: ${pig.id}）`)
+      return `${PIGHUB_BASE_URL}/images/default.png`
+    }
+    return url.toString()
   }
 
   private getTodayString() {
-    const formatter = new Intl.DateTimeFormat('en-CA', {
-      timeZone: this.config.timezone || undefined,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    })
-    const parts = Object.fromEntries(
-      formatter.formatToParts(new Date()).map((part) => [part.type, part.value]),
-    )
-    return `${parts.year}-${parts.month}-${parts.day}`
+    try {
+      const formatter = new Intl.DateTimeFormat('en-CA', {
+        timeZone: this.config.timezone || undefined,
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+      })
+      const parts = Object.fromEntries(
+        formatter.formatToParts(new Date()).map((part) => [part.type, part.value]),
+      )
+      return `${parts.year}-${parts.month}-${parts.day}`
+    } catch {
+      return new Date().toISOString().slice(0, 10)
+    }
   }
 
   private pickOne<T>(items: T[]) {
