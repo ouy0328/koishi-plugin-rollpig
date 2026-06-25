@@ -479,11 +479,14 @@ class RollPigStore {
 
         const data = await response.json() as any
         let images = (Array.isArray(data?.data) ? data.data : []).filter(
-          (img: any): img is PigInfo =>
-            typeof img?.id === 'string' && img.id.trim() !== '' &&
+          (img: any): boolean =>
+            (typeof img?.id === 'string' || typeof img?.id === 'number') &&
             typeof img?.title === 'string' &&
             typeof img?.image_url === 'string' && img.image_url.trim() !== '',
-        )
+        ).map((img: any) => ({
+          ...img,
+          id: String(img.id),
+        })) as PigInfo[]
         if (!images.length) {
           throw new Error('PigHub 返回了空图片列表。')
         }
