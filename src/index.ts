@@ -7,7 +7,7 @@ import { Context, h, Logger, Schema } from 'koishi'
 export const name = 'rollpig'
 
 const logger = new Logger(name)
-const PIGHUB_API_URL = 'https://pighub.top/api/all-images'
+const PIGHUB_API_URL = 'https://pighub.top/api/images?sort=2'
 const PIGHUB_BASE_URL = 'https://pighub.top'
 const ROOT_DIR = path.resolve(__dirname, '..')
 const RESOURCE_DIR = path.join(ROOT_DIR, 'resource')
@@ -123,18 +123,16 @@ export const Config: Schema<Config> = Schema.object({
 })
 
 interface PigHubResponse {
-  images?: PigInfo[]
+  data?: PigInfo[]
 }
 
 interface PigInfo {
   id: string
   title: string
-  image_type: string
+  image_url: string
+  filename: string
   view_count: number
   download_count: number
-  thumbnail: string
-  duration: string
-  filename: string
   mtime: number
 }
 
@@ -479,8 +477,8 @@ class RollPigStore {
           throw new Error(`PigHub 请求失败：${response.status} ${response.statusText}`)
         }
 
-        const data = await response.json() as PigHubResponse
-        const images = Array.isArray(data.images) ? data.images : []
+        const data = await response.json() as any
+        const images = Array.isArray(data?.data) ? data.data : []
         if (!images.length) {
           throw new Error('PigHub 返回了空图片列表。')
         }
@@ -558,7 +556,7 @@ class RollPigStore {
   }
 
   private toPigHubImageUrl(pig: PigInfo) {
-    return new URL(pig.thumbnail, PIGHUB_BASE_URL).toString()
+    return new URL(pig.image_url, PIGHUB_BASE_URL).toString()
   }
 
   private getTodayString() {
